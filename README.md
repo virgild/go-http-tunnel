@@ -151,9 +151,9 @@ looks like this
         addr: 192.168.0.5:22
         remote_addr: 0.0.0.0:22
       tls:
-  	    proto: sni
-  	    addr: localhost:443
-  	    host: tls.my-tunnel-host.com
+        proto: sni
+        addr: localhost:443
+        host: tls.my-tunnel-host.com
 ```
 
 Configuration options:
