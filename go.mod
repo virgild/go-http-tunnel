@@ -1,4 +1,4 @@
-module github.com/mmatczuk/go-http-tunnel
+module github.com/virgild/go-http-tunnel
 
 go 1.13
 
