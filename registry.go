@@ -91,7 +91,7 @@ func (r *registry) Subscriber(hostPort string) (id.ID, *Auth, bool) {
 	return h.identifier, h.auth, ok
 }
 
-// Unsubscribe removes client from registry and returns it's RegistryItem.
+// Unsubscribe removes client from registry and returns its RegistryItem.
 func (r *registry) Unsubscribe(identifier id.ID) *RegistryItem {
 	r.mu.Lock()
 	defer r.mu.Unlock()
