@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/mux"
 	"golang.org/x/net/http2"
 
 	"github.com/inconshreveable/go-vhost"
@@ -159,7 +160,7 @@ func (s *Server) disconnected(identifier id.ID) {
 	s.logger.Log(
 		"level", 1,
 		"action", "disconnected",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 	)
 
 	i := s.registry.clear(identifier)
@@ -170,7 +171,7 @@ func (s *Server) disconnected(identifier id.ID) {
 		s.logger.Log(
 			"level", 2,
 			"action", "close listener",
-			"identifier", identifier,
+			"identifier", identifier.String(),
 			"addr", l.Addr(),
 		)
 		l.Close()
@@ -261,7 +262,7 @@ func (s *Server) handleClient(conn net.Conn) {
 		goto reject
 	}
 
-	logger = logger.With("identifier", identifier)
+	logger = logger.With("identifier", identifier.String())
 
 	if s.config.AutoSubscribe {
 		s.Subscribe(identifier)
@@ -398,7 +399,7 @@ func (s *Server) notifyError(serverError error, identifier id.ID) {
 		s.logger.Log(
 			"level", 2,
 			"action", "client error notification failed",
-			"identifier", identifier,
+			"identifier", identifier.String(),
 			"err", err,
 		)
 		return
@@ -435,7 +436,7 @@ func (s *Server) addTunnels(tunnels map[string]*proto.Tunnel, identifier id.ID) 
 			s.logger.Log(
 				"level", 2,
 				"action", "open listener",
-				"identifier", identifier,
+				"identifier", identifier.String(),
 				"addr", l.Addr(),
 			)
 
@@ -454,7 +455,7 @@ func (s *Server) addTunnels(tunnels map[string]*proto.Tunnel, identifier id.ID) 
 			s.logger.Log(
 				"level", 2,
 				"action", "add SNI vhost",
-				"identifier", identifier,
+				"identifier", identifier.String(),
 				"host", t.Host,
 			)
 
@@ -485,7 +486,7 @@ rollback:
 }
 
 // Unsubscribe removes client from registry, disconnects client if already
-// connected and returns it's RegistryItem.
+// connected and returns its RegistryItem.
 func (s *Server) Unsubscribe(identifier id.ID) *RegistryItem {
 	s.connPool.DeleteConn(identifier)
 	return s.registry.Unsubscribe(identifier)
@@ -507,7 +508,7 @@ func (s *Server) listen(l net.Listener, identifier id.ID) {
 				s.logger.Log(
 					"level", 2,
 					"action", "listener closed",
-					"identifier", identifier,
+					"identifier", identifier.String(),
 					"addr", addr,
 				)
 				return
@@ -516,7 +517,7 @@ func (s *Server) listen(l net.Listener, identifier id.ID) {
 			s.logger.Log(
 				"level", 0,
 				"msg", "accept of connection failed",
-				"identifier", identifier,
+				"identifier", identifier.String(),
 				"addr", addr,
 				"err", err,
 			)
@@ -542,7 +543,7 @@ func (s *Server) listen(l net.Listener, identifier id.ID) {
 			s.logger.Log(
 				"level", 1,
 				"msg", "TCP keepalive for tunneled connection failed",
-				"identifier", identifier,
+				"identifier", identifier.String(),
 				"ctrlMsg", msg,
 				"err", err,
 			)
@@ -553,7 +554,7 @@ func (s *Server) listen(l net.Listener, identifier id.ID) {
 				s.logger.Log(
 					"level", 0,
 					"msg", "proxy error",
-					"identifier", identifier,
+					"identifier", identifier.String(),
 					"ctrlMsg", msg,
 					"err", err,
 				)
@@ -593,6 +594,107 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"dst", r.RemoteAddr,
 		"src", r.Host,
 	))
+}
+
+// APIHandler returns an HTTP handler for API requests.
+func (s *Server) APIHandler() http.Handler {
+	router := mux.NewRouter()
+	router.HandleFunc("/__health", s.apiHealth).Methods(http.MethodGet)
+
+	apiRouter := router.PathPrefix("/api/v1").Subrouter()
+	apiRouter.HandleFunc("/subscribe", s.apiSubscribe).Methods(http.MethodPost)
+	apiRouter.HandleFunc("/unsubscribe", s.apiUnsubscribe).Methods(http.MethodPost)
+
+	return router
+}
+
+func (s *Server) apiHealth(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "status OK\n")
+	fmt.Fprintf(w, "registered %d\n", len(s.registry.items))
+	fmt.Fprintf(w, "hosts %d\n", len(s.registry.hosts))
+	fmt.Fprintf(w, "connections %d\n", len(s.connPool.conns))
+}
+
+func (s *Server) apiSubscribe(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get(http.CanonicalHeaderKey("Content-Type")) != "application/json" {
+		http.Error(w, "must be application/json", http.StatusNotAcceptable)
+		return
+	}
+
+	type subscribeData struct {
+		ID string `json:"id"`
+	}
+	var data subscribeData
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil {
+		http.Error(w, "decoding failed", http.StatusBadRequest)
+		return
+	}
+
+	ident := id.New(nil)
+	err = ident.UnmarshalText([]byte(data.ID))
+	if err != nil {
+		http.Error(w, "id unmarshal failed", http.StatusBadRequest)
+		return
+	}
+
+	s.Subscribe(ident)
+
+	var res = struct {
+		Status string `json:"status"`
+	}{
+		Status: "ok",
+	}
+	w.Header().Set(http.CanonicalHeaderKey("Content-Type"), "application/json")
+	enc := json.NewEncoder(w)
+	err = enc.Encode(res)
+	if err != nil {
+		w.Header().Set(http.CanonicalHeaderKey("Content-Type"), "text/plain")
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) apiUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get(http.CanonicalHeaderKey("Content-Type")) != "application/json" {
+		http.Error(w, "must be application/json", http.StatusNotAcceptable)
+		return
+	}
+
+	type unsubscribeData struct {
+		ID string `json:"id"`
+	}
+	var data unsubscribeData
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&data)
+	if err != nil {
+		http.Error(w, "decoding failed", http.StatusBadRequest)
+		return
+	}
+
+	ident := id.New(nil)
+	err = ident.UnmarshalText([]byte(data.ID))
+	if err != nil {
+		http.Error(w, "id unmarshal failed", http.StatusBadRequest)
+		return
+	}
+
+	s.Unsubscribe(ident)
+
+	var res = struct {
+		Status string `json:"status"`
+	}{
+		Status: "ok",
+	}
+	w.Header().Set(http.CanonicalHeaderKey("Content-Type"), "application/json")
+	enc := json.NewEncoder(w)
+	err = enc.Encode(res)
+	if err != nil {
+		w.Header().Set(http.CanonicalHeaderKey("Content-Type"), "text/plain")
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // RoundTrip is http.RoundTriper implementation.
@@ -644,7 +746,7 @@ func (s *Server) proxyConn(identifier id.ID, conn net.Conn, msg *proto.ControlMe
 	s.logger.Log(
 		"level", 2,
 		"action", "proxy conn",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 		"ctrlMsg", msg,
 	)
 
@@ -693,7 +795,7 @@ func (s *Server) proxyConn(identifier id.ID, conn net.Conn, msg *proto.ControlMe
 	s.logger.Log(
 		"level", 2,
 		"action", "proxy conn done",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 		"ctrlMsg", msg,
 	)
 
@@ -704,7 +806,7 @@ func (s *Server) proxyHTTP(identifier id.ID, r *http.Request, msg *proto.Control
 	s.logger.Log(
 		"level", 2,
 		"action", "proxy HTTP",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 		"ctrlMsg", msg,
 	)
 
@@ -724,7 +826,7 @@ func (s *Server) proxyHTTP(identifier id.ID, r *http.Request, msg *proto.Control
 			s.logger.Log(
 				"level", 0,
 				"msg", "proxy error",
-				"identifier", identifier,
+				"identifier", identifier.String(),
 				"ctrlMsg", msg,
 				"err", err,
 			)
@@ -733,7 +835,7 @@ func (s *Server) proxyHTTP(identifier id.ID, r *http.Request, msg *proto.Control
 		s.logger.Log(
 			"level", 3,
 			"action", "transferred",
-			"identifier", identifier,
+			"identifier", identifier.String(),
 			"bytes", cw.count,
 			"dir", "user to client",
 			"dst", r.Host,
@@ -753,7 +855,7 @@ func (s *Server) proxyHTTP(identifier id.ID, r *http.Request, msg *proto.Control
 	s.logger.Log(
 		"level", 2,
 		"action", "proxy HTTP done",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 		"ctrlMsg", msg,
 		"status code", resp.StatusCode,
 	)

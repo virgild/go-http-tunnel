@@ -64,7 +64,7 @@ func (r *registry) Subscribe(identifier id.ID) {
 	r.logger.Log(
 		"level", 1,
 		"action", "subscribe",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 	)
 
 	r.items[identifier] = voidRegistryItem
@@ -104,7 +104,7 @@ func (r *registry) Unsubscribe(identifier id.ID) *RegistryItem {
 	r.logger.Log(
 		"level", 1,
 		"action", "unsubscribe",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 	)
 
 	if i.Hosts != nil {
@@ -122,7 +122,7 @@ func (r *registry) set(i *RegistryItem, identifier id.ID) error {
 	r.logger.Log(
 		"level", 2,
 		"action", "set registry item",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 	)
 
 	r.mu.Lock()
@@ -163,7 +163,7 @@ func (r *registry) clear(identifier id.ID) *RegistryItem {
 	r.logger.Log(
 		"level", 2,
 		"action", "clear registry item",
-		"identifier", identifier,
+		"identifier", identifier.String(),
 	)
 
 	r.mu.Lock()
