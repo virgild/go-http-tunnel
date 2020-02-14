@@ -57,7 +57,7 @@ func parseArgs() *options {
 	sniAddr := flag.String("sniAddr", "", "Public address listening for TLS SNI connections, empty string to disable")
 	tlsCrt := flag.String("tlsCrt", "server.crt", "Path to a TLS certificate file")
 	tlsKey := flag.String("tlsKey", "server.key", "Path to a TLS key file")
-	rootCA := flag.String("rootCA", "", "Path to the trusted certificate chian used for client certificate authentication, if empty any client certificate is accepted")
+	rootCA := flag.String("rootCA", "", "Path to the trusted certificate chain used for client certificate authentication, if empty any client certificate is accepted")
 	clients := flag.String("clients", "", "Comma-separated list of tunnel client ids, if empty accept all clients")
 	logLevel := flag.Int("log-level", 1, "Level of messages to log, 0-3")
 	version := flag.Bool("version", false, "Prints tunneld version")
